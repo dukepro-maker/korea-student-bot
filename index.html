@@ -186,6 +186,27 @@
   #send-btn:disabled { background: #ccc; cursor: not-allowed; transform: none; }
   #send-btn svg { width: 16px; height: 16px; }
 
+  #mic-btn {
+    width: 38px; height: 38px; border-radius: 12px;
+    background: var(--bg); border: 1px solid var(--border);
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+    color: var(--text-muted); flex-shrink: 0; transition: all 0.15s;
+  }
+  #mic-btn:hover { background: var(--teal-light); color: var(--teal-dark); border-color: var(--teal-mid); }
+  #mic-btn.listening { background: #FCEBEB; color: #E24B4A; border-color: #F09595; animation: pulse 1s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.6} }
+  #mic-btn svg { width: 16px; height: 16px; }
+
+  #audio-toggle {
+    width: 38px; height: 38px; border-radius: 12px;
+    background: var(--bg); border: 1px solid var(--border);
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+    color: var(--text-muted); flex-shrink: 0; transition: all 0.15s;
+  }
+  #audio-toggle:hover { background: var(--teal-light); color: var(--teal-dark); }
+  #audio-toggle.on { background: var(--teal-light); color: var(--teal-dark); border-color: var(--teal-mid); }
+  #audio-toggle svg { width: 16px; height: 16px; }
+
   .dev-credit {
     width: 100%; max-width: 680px;
     text-align: center; font-size: 12px;
@@ -216,7 +237,7 @@
   <div id="messages">
     <div class="msg bot">
       <div class="msg-avatar">🎓</div>
-      <div class="bubble">안녕하세요! I'm your Korea international student assistant. Ask me anything — visas, housing, banking, TOPIK, health insurance, and more.</div>
+      <div class="bubble">Hello! My name is Ohene. I'm your Korea international student assistant. Ask me anything — visas, housing, banking, TOPIK, health insurance, and more.</div>
     </div>
   </div>
 
@@ -229,7 +250,22 @@
   </div>
 
   <div id="input-row">
-    <input id="user-input" type="text" placeholder="Ask a question..." autocomplete="off" />
+    <button id="audio-toggle" class="on" onclick="toggleAudio()" title="Toggle voice responses">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+        <path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path>
+        <path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+      </svg>
+    </button>
+    <input id="user-input" type="text" placeholder="Ask a question or tap the mic..." autocomplete="off" />
+    <button id="mic-btn" onclick="toggleMic()" title="Speak your question">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+        <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+        <line x1="12" y1="19" x2="12" y2="23"></line>
+        <line x1="8" y1="23" x2="16" y2="23"></line>
+      </svg>
+    </button>
     <button id="send-btn" onclick="handleSend()" title="Send">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
         <line x1="22" y1="2" x2="11" y2="13"></line>
@@ -242,8 +278,67 @@
 <div class="dev-credit">Developed by <span>Prof. Duke Ofosu-Anim</span> · Yemyung Graduate University</div>
 
 <script>
-let history = [];
-let loading = false;
+let audioEnabled = true;
+let recognition = null;
+let isListening = false;
+let currentAudio = null;
+
+function toggleAudio() {
+  audioEnabled = !audioEnabled;
+  document.getElementById('audio-toggle').classList.toggle('on', audioEnabled);
+  if (!audioEnabled && currentAudio) { currentAudio.pause(); currentAudio = null; }
+}
+
+function toggleMic() {
+  if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+    addBotMessage('Sorry, your browser does not support voice input. Please use Chrome or Edge.');
+    return;
+  }
+  if (isListening) { recognition.stop(); return; }
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  recognition = new SR();
+  recognition.lang = 'en-US';
+  recognition.interimResults = false;
+  recognition.onstart = () => {
+    isListening = true;
+    document.getElementById('mic-btn').classList.add('listening');
+    document.getElementById('user-input').placeholder = 'Listening...';
+  };
+  recognition.onresult = (e) => {
+    const transcript = e.results[0][0].transcript;
+    document.getElementById('user-input').value = transcript;
+    sendMessage(transcript);
+  };
+  recognition.onerror = () => stopMic();
+  recognition.onend = () => stopMic();
+  recognition.start();
+}
+
+function stopMic() {
+  isListening = false;
+  document.getElementById('mic-btn').classList.remove('listening');
+  document.getElementById('user-input').placeholder = 'Ask a question or tap the mic...';
+}
+
+async function speakText(text) {
+  if (!audioEnabled) return;
+  try {
+    const clean = text.replace(/[#*`_~]/g, '').replace(/\n+/g, ' ').trim();
+    const res = await fetch('/api/tts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: clean.slice(0, 800) })
+    });
+    if (!res.ok) return;
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    if (currentAudio) { currentAudio.pause(); URL.revokeObjectURL(currentAudio.src); }
+    currentAudio = new Audio(url);
+    currentAudio.play();
+  } catch (e) { console.error('TTS error:', e); }
+}
+
+
 
 function addUserMessage(text) {
   const msgs = document.getElementById('messages');
@@ -306,6 +401,7 @@ async function sendMessage(text) {
     history.push({ role: 'assistant', content: data.reply });
     removeTyping();
     addBotMessage(data.reply);
+    speakText(data.reply);
   } catch (e) {
     removeTyping();
     addBotMessage('Sorry, something went wrong: ' + e.message);
