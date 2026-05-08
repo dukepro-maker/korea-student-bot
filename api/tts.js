@@ -6,7 +6,7 @@ export default async function handler(req, res) {
   const { text } = req.body;
   if (!text) return res.status(400).json({ error: 'No text provided' });
 
-  const VOICE_ID = 'pNInz6obpgDQGcFmaJgB'; // Adam — warm & friendly
+  const VOICE_ID = 'SRg14mefddCBNpMGptVL'; // Prof. Duke Ofosu-Anim
 
   try {
     const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}`, {
