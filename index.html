@@ -207,6 +207,18 @@
   #audio-toggle.on { background: var(--teal-light); color: var(--teal-dark); border-color: var(--teal-mid); }
   #audio-toggle svg { width: 16px; height: 16px; }
 
+  .audio-status {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 12px; color: var(--text-hint); margin-top: 4px;
+    cursor: pointer; transition: color 0.15s;
+  }
+  .audio-status:hover { color: var(--teal); }
+  .audio-status svg { width: 13px; height: 13px; flex-shrink: 0; }
+  .audio-status.loading { color: var(--teal); }
+  .audio-status.error { color: #E24B4A; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .spinning { animation: spin 1s linear infinite; }
+
   .dev-credit {
     width: 100%; max-width: 680px;
     text-align: center; font-size: 12px;
@@ -322,22 +334,37 @@ function stopMic() {
   document.getElementById('user-input').placeholder = 'Ask a question or tap the mic...';
 }
 
-async function speakText(text) {
+async function speakText(text, statusEl) {
   if (!audioEnabled) return;
+  if (statusEl) {
+    statusEl.className = 'audio-status loading';
+    statusEl.innerHTML = `<svg class="spinning" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg> Generating voice...`;
+  }
   try {
     const clean = text.replace(/[#*`_~]/g, '').replace(/\n+/g, ' ').trim();
     const res = await fetch('/api/tts', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: clean.slice(0, 800) })
+      body: JSON.stringify({ text: clean.slice(0, 500) })
     });
-    if (!res.ok) return;
+    if (!res.ok) throw new Error('TTS failed');
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
     if (currentAudio) { currentAudio.pause(); URL.revokeObjectURL(currentAudio.src); }
     currentAudio = new Audio(url);
     currentAudio.play();
-  } catch (e) { console.error('TTS error:', e); }
+    if (statusEl) {
+      statusEl.className = 'audio-status';
+      statusEl.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg> Playing`;
+      currentAudio.onended = () => { if (statusEl) statusEl.innerHTML = ''; };
+    }
+  } catch (e) {
+    if (statusEl) {
+      statusEl.className = 'audio-status error';
+      statusEl.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg> Voice failed — <u>retry</u>`;
+      statusEl.onclick = () => speakText(text, statusEl);
+    }
+  }
 }
 
 
@@ -356,9 +383,13 @@ function addBotMessage(text) {
   const div = document.createElement('div');
   div.className = 'msg bot';
   const rendered = typeof marked !== 'undefined' ? marked.parse(text) : escapeHtml(text);
+  const statusEl = document.createElement('div');
+  statusEl.className = 'audio-status';
   div.innerHTML = `<div class="msg-avatar">🎓</div><div class="bubble">${rendered}</div>`;
+  div.querySelector('.bubble').appendChild(statusEl);
   msgs.appendChild(div);
   msgs.scrollTop = msgs.scrollHeight;
+  return statusEl;
 }
 
 function showTyping() {
@@ -402,8 +433,8 @@ async function sendMessage(text) {
 
     history.push({ role: 'assistant', content: data.reply });
     removeTyping();
-    addBotMessage(data.reply);
-    speakText(data.reply);
+    const statusEl = addBotMessage(data.reply);
+    speakText(data.reply, statusEl);
   } catch (e) {
     removeTyping();
     addBotMessage('Sorry, something went wrong: ' + e.message);
